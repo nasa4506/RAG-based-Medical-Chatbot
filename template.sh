@@ -1,5 +1,6 @@
 mkdir -p src
 mkdir -p resource
+mkdir -p research
 
 #creating files
 touch src/__init__.py
