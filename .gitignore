@@ -1,0 +1,15 @@
+# Ignore venv
+venv/
+
+# Ignore nested repo
+Project/Build-a-Complete-Medical-Chatbot-with-LLMs-LangChain-Pinecone-Flask-AWS/
+
+# Common Python ignores
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+.env
+.DS_Store
+*.sqlite3
