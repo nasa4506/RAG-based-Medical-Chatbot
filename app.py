@@ -4,11 +4,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from src.helper import download_hugging_face_embeddings
-from langchain_pinecone import PineconeVectorStore
+from langchain_community.vectorstores import Pinecone
 from langchain_ollama import ChatOllama
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
 from src.prompt import system_prompt
 import os
@@ -39,7 +39,7 @@ embeddings = download_hugging_face_embeddings()
 index_name = "medical-chatbot"
 
 # Connect to existing Pinecone index
-docsearch = PineconeVectorStore.from_existing_index(
+docsearch = Pinecone.from_existing_index(
     index_name=index_name,
     embedding=embeddings
 )
@@ -58,9 +58,18 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-# Create chains
-question_answer_chain = create_stuff_documents_chain(chatModel, prompt)
-rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+# Create RAG chain using LCEL (LangChain Expression Language) - LangChain 1.0 pattern
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+def create_rag_chain_input(user_input: str):
+    """Format input for RAG chain"""
+    docs = retriever.invoke(user_input)
+    return {"context": format_docs(docs), "input": user_input}
+
+rag_chain = (
+    RunnablePassthrough() | create_rag_chain_input
+) | prompt | chatModel | StrOutputParser()
 
 # Request/Response models
 class ChatRequest(BaseModel):
@@ -88,10 +97,11 @@ async def chat(request: ChatRequest):
         
         print(f"Received query: {request.message}")
         
-        # Invoke RAG chain
-        response = rag_chain.invoke({"input": request.message})
+        # Invoke RAG chain (returns string directly in LCEL)
+        answer = rag_chain.invoke(request.message)
         
-        answer = response.get("answer", "I apologize, but I couldn't generate a response.")
+        if not answer:
+            answer = "I apologize, but I couldn't generate a response."
         print(f"Response: {answer}")
         
         return ChatResponse(answer=answer)

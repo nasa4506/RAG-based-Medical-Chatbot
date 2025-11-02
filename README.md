@@ -18,7 +18,7 @@ An AI-powered medical chatbot application that uses Retrieval Augmented Generati
 - **LangChain**: Framework for building LLM applications
 - **Ollama**: Local LLM runtime for running models like `qwen3:4b-instruct`
 - **Pinecone**: Vector database for storing and retrieving document embeddings
-- **HuggingFace Embeddings**: Sentence transformers for document embeddings (`all-MiniLM-L6-v2`)
+- **HuggingFace Embeddings**: Sentence transformers for document embeddings via `langchain-huggingface` (`all-MiniLM-L6-v2`)
 - **Python 3.12+**: Programming language
 
 ### Frontend

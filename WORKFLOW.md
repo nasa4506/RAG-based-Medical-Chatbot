@@ -103,6 +103,8 @@ This phase runs once (or when adding new documents) to process PDFs and create t
 **File:** `src/helper.py` → `load_pdf_file()`
 
 ```python
+from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
+
 def load_pdf_file(data):
     loader = DirectoryLoader(data, glob="*.pdf", loader_cls=PyPDFLoader)
     documents = loader.load()
@@ -130,6 +132,9 @@ def load_pdf_file(data):
 **File:** `src/helper.py` → `filter_to_minimal_docs()`
 
 ```python
+from typing import List
+from langchain_core.documents import Document
+
 def filter_to_minimal_docs(docs: List[Document]) -> List[Document]:
     minimal_docs = []
     for doc in docs:
@@ -151,6 +156,8 @@ def filter_to_minimal_docs(docs: List[Document]) -> List[Document]:
 **File:** `src/helper.py` → `text_split()`
 
 ```python
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 def text_split(extracted_data):
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,      # Each chunk ~500 characters
@@ -185,6 +192,8 @@ Chunk 2: "[...] from mild to severe, with symptoms including whiteheads, blackhe
 **File:** `src/helper.py` → `download_hugging_face_embeddings()`
 
 ```python
+from langchain_huggingface import HuggingFaceEmbeddings
+
 def download_hugging_face_embeddings():
     embeddings = HuggingFaceEmbeddings(
         model_name='sentence-transformers/all-MiniLM-L6-v2'
@@ -237,6 +246,8 @@ if not pc.has_index(index_name):
 **File:** `src/store_index.py` (lines 78-83)
 
 ```python
+from langchain_community.vectorstores import Pinecone as PineconeVectorStore
+
 docsearch = PineconeVectorStore.from_documents(
     documents=text_chunks,     # All document chunks
     index_name=index_name,     # "medical-chatbot"
@@ -313,7 +324,9 @@ async def chat(request: ChatRequest):
 embeddings = download_hugging_face_embeddings()
 
 # 2. Connect to existing Pinecone index (READ-ONLY)
-docsearch = PineconeVectorStore.from_existing_index(
+from langchain_community.vectorstores import Pinecone
+
+docsearch = Pinecone.from_existing_index(
     index_name="medical-chatbot",
     embedding=embeddings
 )
@@ -333,9 +346,20 @@ prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}")        # User question
 ])
 
-# 6. Build chains
-question_answer_chain = create_stuff_documents_chain(chatModel, prompt)
-rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+# 6. Build RAG chain using LCEL (LangChain Expression Language)
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+def create_rag_chain_input(user_input: str):
+    docs = retriever.invoke(user_input)
+    return {"context": format_docs(docs), "input": user_input}
+
+rag_chain = (
+    RunnablePassthrough() | create_rag_chain_input
+) | prompt | chatModel | StrOutputParser()
 ```
 
 **Component Explanation:**
@@ -358,12 +382,13 @@ rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 - **System prompt:** Instructions telling AI it's a medical assistant
 - **Human input:** The user's question
 
-**E. Chains:**
-- `question_answer_chain`: Takes documents + question → generates answer
-- `rag_chain`: Retrieves documents first, then generates answer
+**E. RAG Chain (LCEL):**
+- Uses LangChain Expression Language (LCEL) with pipe operators (`|`)
+- Retrieves documents → formats context → builds prompt → generates answer
+- Modern, composable approach to building chains
 
 #### Step 4: RAG Chain Processing
-**When:** `rag_chain.invoke({"input": request.message})` is called
+**When:** `rag_chain.invoke(request.message)` is called
 
 **Sub-step 4a: Convert Question to Embedding**
 
@@ -442,10 +467,11 @@ term for common acne and is the most common skin disease."
 #### Step 5: Return Answer to Frontend
 
 ```python
-return ChatResponse(answer=response["answer"])
+return ChatResponse(answer=answer)
 ```
 
 **What happens:**
+- RAG chain returns string directly (via LCEL `StrOutputParser()`)
 - FastAPI returns JSON response:
 ```json
 {
@@ -472,6 +498,7 @@ return ChatResponse(answer=response["answer"])
 - Trained on millions of text pairs
 - Understands semantic meaning
 - Similar meanings → similar vectors
+- Imported from `langchain_huggingface` package
 
 **Example:**
 ```
@@ -497,10 +524,11 @@ Text: "What is diabetes?"
 - **Dimension:** 384
 - **Metric:** Cosine similarity
 - **Storage:** Thousands of document chunks
+- **Import:** `from langchain_community.vectorstores import Pinecone`
 
 **Operations:**
-- **Write:** During `store_index.py` (Phase 1)
-- **Read:** During `app.py` queries (Phase 2)
+- **Write:** During `store_index.py` (Phase 1) - uses `Pinecone.from_documents()`
+- **Read:** During `app.py` queries (Phase 2) - uses `Pinecone.from_existing_index()`
 
 **Why Pinecone?**
 - Fast similarity search (milliseconds)
@@ -584,19 +612,17 @@ system_prompt = (
 
 **Components:**
 
-**A. `create_stuff_documents_chain`:**
-- Takes documents + question
-- Formats into prompt
-- Sends to LLM
-- Returns answer
-
-**B. `create_retrieval_chain`:**
-- Combines retriever + question-answer chain
-- Complete RAG pipeline
+**A. LCEL Chain Composition:**
+- Uses pipe operators (`|`) to compose chain components
+- `RunnablePassthrough()`: Passes input through
+- `create_rag_chain_input`: Formats retrieved documents into context
+- `prompt`: Formats prompt with context and question
+- `chatModel`: Generates answer
+- `StrOutputParser()`: Parses output to string
 
 **Flow:**
 ```
-Question → Retrieval → Context + Question → LLM → Answer
+Question → Retrieval → Format Context → Prompt → LLM → Parse → Answer
 ```
 
 ---
@@ -752,6 +778,7 @@ if not pc.has_index("medical-chatbot"):          # Check index
     pc.create_index(...)                           # Create if needed
 
 # 5. Upload documents
+from langchain_community.vectorstores import Pinecone as PineconeVectorStore
 PineconeVectorStore.from_documents(...)           # Generate embeddings & upload
 ```
 
@@ -760,45 +787,47 @@ PineconeVectorStore.from_documents(...)           # Generate embeddings & upload
 ```python
 # Application startup (runs once)
 embeddings = download_hugging_face_embeddings()        # Load embedding model
-docsearch = PineconeVectorStore.from_existing_index(...)  # Connect to Pinecone
+from langchain_community.vectorstores import Pinecone
+docsearch = Pinecone.from_existing_index(...)          # Connect to Pinecone
 retriever = docsearch.as_retriever(k=3)                # Setup retriever
 chatModel = ChatOllama(model="qwen3:4b-instruct")      # Load LLM
-rag_chain = create_retrieval_chain(...)                 # Build RAG pipeline
+# Build RAG chain using LCEL (see code for details)
+rag_chain = (RunnablePassthrough() | ...) | prompt | chatModel | StrOutputParser()
 
 # Per-request processing (runs for each question)
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    response = rag_chain.invoke({"input": request.message})  # Process question
-    return ChatResponse(answer=response["answer"])            # Return answer
+    answer = rag_chain.invoke(request.message)         # Process question (returns string)
+    return ChatResponse(answer=answer)                   # Return answer
 ```
 
 ### Phase 2 Internal: RAG Chain Execution
 
 ```
-rag_chain.invoke({"input": "What is acne?"})
+rag_chain.invoke("What is acne?")
     │
-    ├─→ retriever.invoke("What is acne?")
-    │   │
-    │   ├─→ Convert "What is acne?" → embedding vector
-    │   ├─→ Search Pinecone with vector
-    │   ├─→ Return top 3 similar chunks
-    │   │
-    │   └─→ Retrieved docs: [doc1, doc2, doc3]
+    ├─→ RunnablePassthrough() passes input through
     │
-    └─→ question_answer_chain.invoke({
-            "input": "What is acne?",
-            "context": [doc1, doc2, doc3]
-        })
-        │
-        ├─→ Format prompt:
-        │   - System: "You are a medical assistant..."
-        │   - Context: doc1 + doc2 + doc3
-        │   - Question: "What is acne?"
-        │
-        └─→ chatModel.invoke(prompt)
-            │
-            └─→ Ollama generates answer
-                → "Acne is a common skin disease..."
+    ├─→ create_rag_chain_input("What is acne?")
+    │   │
+    │   ├─→ retriever.invoke("What is acne?")
+    │   │   ├─→ Convert "What is acne?" → embedding vector
+    │   │   ├─→ Search Pinecone with vector
+    │   │   └─→ Return top 3 similar chunks: [doc1, doc2, doc3]
+    │   │
+    │   └─→ Return {"context": format_docs([doc1, doc2, doc3]), "input": "What is acne?"}
+    │
+    ├─→ prompt.invoke({context, input})
+    │   ├─→ Format prompt:
+    │   │   - System: "You are a medical assistant..."
+    │   │   - Context: doc1 + doc2 + doc3
+    │   │   - Question: "What is acne?"
+    │
+    ├─→ chatModel.invoke(formatted_prompt)
+    │   └─→ Ollama generates answer
+    │
+    └─→ StrOutputParser() parses to string
+        → "Acne is a common skin disease..."
 ```
 
 ---
@@ -860,16 +889,19 @@ rag_chain.invoke({"input": "What is acne?"})
 1. **Setup Phase (`store_index.py`):**
    - Process PDFs → Chunks → Embeddings → Pinecone
    - Run once or when adding documents
+   - Uses `langchain_huggingface` for embeddings
+   - Uses `langchain_community.vectorstores.Pinecone` for storage
 
 2. **Runtime Phase (`app.py`):**
    - Question → Embedding → Search Pinecone → Retrieve context → LLM → Answer
    - Runs for every user query
+   - Uses LCEL (LangChain Expression Language) for chain composition
 
 3. **Key Technologies:**
-   - **Embeddings:** Semantic understanding
-   - **Pinecone:** Fast vector search
-   - **Ollama:** Local LLM generation
-   - **LangChain:** Orchestration
+   - **Embeddings:** `langchain_huggingface.HuggingFaceEmbeddings` for semantic understanding
+   - **Pinecone:** `langchain_community.vectorstores.Pinecone` for fast vector search
+   - **Ollama:** Local LLM generation via `langchain_ollama.ChatOllama`
+   - **LangChain:** Orchestration using LCEL pattern
 
 4. **Benefits of RAG:**
    - Accurate (uses actual documents)

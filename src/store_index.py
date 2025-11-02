@@ -1,9 +1,9 @@
 from dotenv import load_dotenv
 import os
 from src.helper import load_pdf_file, filter_to_minimal_docs, text_split, download_hugging_face_embeddings
-from pinecone import Pinecone
+from pinecone import Pinecone as PineconeClient
 from pinecone import ServerlessSpec 
-from langchain_pinecone import PineconeVectorStore
+from langchain_community.vectorstores import Pinecone as PineconeVectorStore
 
 load_dotenv()
 
@@ -20,7 +20,7 @@ text_chunks=text_split(filter_data)
 embeddings = download_hugging_face_embeddings()
 
 pinecone_api_key = PINECONE_API_KEY
-pc = Pinecone(api_key=pinecone_api_key)
+pc = PineconeClient(api_key=pinecone_api_key)
 
 
 
