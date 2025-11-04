@@ -44,11 +44,25 @@ docsearch = Pinecone.from_existing_index(
     embedding=embeddings
 )
 
-# Create retriever
-retriever = docsearch.as_retriever(search_type="similarity", search_kwargs={"k": 3})
+# Create retriever - increased k to leverage large context window (256K tokens)
+# With Qwen3-4B's 256K context window, we can retrieve and process many more documents
+retriever = docsearch.as_retriever(
+    search_type="similarity", 
+    search_kwargs={"k": 7}  # Increased from 3 to 10 for more comprehensive context
+)
 
 # Initialize Ollama model (using qwen3:4b-instruct as in trials.ipynb)
-chatModel = ChatOllama(model="qwen3:4b-instruct")
+# Configure model parameters for better, more detailed responses
+# Note: Ollama parameters may vary - adjust based on model capabilities
+chatModel = ChatOllama(
+    model="qwen3:4b-instruct",
+    temperature=0.5,  # Allows for more diverse and detailed responses (0.0-1.0)
+    num_predict=1024,  # Increase max tokens for longer responses (check Ollama model limits)
+    # Additional parameters if supported by your Ollama version:
+    # top_p=0.9,      # Nucleus sampling
+    # top_k=40,       # Top-k sampling
+    # repeat_penalty=1.1  # Reduce repetition
+)
 
 # Create prompt template
 prompt = ChatPromptTemplate.from_messages(
@@ -60,7 +74,17 @@ prompt = ChatPromptTemplate.from_messages(
 
 # Create RAG chain using LCEL (LangChain Expression Language) - LangChain 1.0 pattern
 def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
+    """Format retrieved documents with better structure and metadata"""
+    formatted_parts = []
+    for i, doc in enumerate(docs, 1):
+        # Include source information if available
+        source = doc.metadata.get("source", "medical literature")
+        content = doc.page_content.strip()
+        
+        formatted_parts.append(
+            f"[Document {i} - Source: {source}]\n{content}"
+        )
+    return "\n\n---\n\n".join(formatted_parts)
 
 def create_rag_chain_input(user_input: str):
     """Format input for RAG chain"""

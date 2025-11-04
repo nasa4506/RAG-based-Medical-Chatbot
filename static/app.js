@@ -90,6 +90,89 @@ function MedicalChatbot() {
         setInputValue(question);
     };
 
+    // Function to clean and render text safely - removes all markdown symbols
+    const renderText = (text) => {
+        if (!text) return { __html: '' };
+        
+        let html = text;
+        
+        // Step 1: Convert markdown bold (**text** or __text__) to HTML bold first
+        // Process double asterisks/underscores before single ones
+        html = html.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/__([^_\n]+?)__/g, '<strong>$1</strong>');
+        
+        // Step 2: Convert remaining single asterisks/underscores to italic (only if not part of bold)
+        html = html.replace(/([^*]|^)\*([^*\n]+?)\*([^*]|$)/g, '$1<em>$2</em>$3');
+        
+        // Step 3: Remove all markdown heading symbols (#, ##, ###, etc.)
+        html = html.replace(/^#{1,6}\s*/gm, '');
+        html = html.replace(/###+/g, ''); // Remove any standalone ###
+        html = html.replace(/##+/g, '');  // Remove any standalone ##
+        html = html.replace(/^#+\s*/gm, ''); // Clean up any remaining # at line start
+        
+        // Step 4: Remove any leftover markdown symbols (clean up any remaining marks)
+        html = html.replace(/\*\*/g, ''); // Remove leftover **
+        // Remove standalone single asterisks (not inside words or between spaces)
+        html = html.replace(/\s+\*\s+/g, ' '); // Remove * surrounded by spaces
+        html = html.replace(/\*\s+/g, ''); // Remove * at start of text with space after
+        
+        // Step 5: Process lists - convert markdown lists to HTML
+        const lines = html.split('\n');
+        let processedLines = [];
+        let inList = false;
+        
+        lines.forEach((line) => {
+            const listMatch = line.match(/^\s*[-*+]\s+(.+)$/);
+            if (listMatch) {
+                if (!inList) {
+                    processedLines.push('<ul>');
+                    inList = true;
+                }
+                processedLines.push('<li>' + listMatch[1] + '</li>');
+            } else {
+                if (inList) {
+                    processedLines.push('</ul>');
+                    inList = false;
+                }
+                if (line.trim()) {
+                    processedLines.push(line);
+                }
+            }
+        });
+        if (inList) {
+            processedLines.push('</ul>');
+        }
+        html = processedLines.join('\n');
+        
+        // Step 6: Escape HTML to prevent XSS
+        html = html
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        
+        // Step 7: Restore our HTML tags (they were escaped)
+        html = html
+            .replace(/&lt;strong&gt;/g, '<strong>')
+            .replace(/&lt;\/strong&gt;/g, '</strong>')
+            .replace(/&lt;em&gt;/g, '<em>')
+            .replace(/&lt;\/em&gt;/g, '</em>')
+            .replace(/&lt;ul&gt;/g, '<ul>')
+            .replace(/&lt;\/ul&gt;/g, '</ul>')
+            .replace(/&lt;li&gt;/g, '<li>')
+            .replace(/&lt;\/li&gt;/g, '</li>');
+        
+        // Step 8: Handle line breaks
+        html = html.replace(/\n\n+/g, '</p><p>');
+        html = html.replace(/\n/g, '<br>');
+        
+        // Step 9: Wrap content in paragraphs
+        if (html.trim() && !html.trim().startsWith('<ul>') && !html.trim().startsWith('<p>')) {
+            html = '<p>' + html + '</p>';
+        }
+        
+        return { __html: html };
+    };
+
     return (
         <div className="app-container">
             <header className="header">
@@ -159,7 +242,10 @@ function MedicalChatbot() {
                                     {message.sender === 'user' ? '👤' : '🤖'}
                                 </div>
                                 <div className="message-content">
-                                    <div>{message.text}</div>
+                                    <div 
+                                        dangerouslySetInnerHTML={renderText(message.text)}
+                                        style={{ lineHeight: '1.6' }}
+                                    ></div>
                                     <div className="message-time">{message.time}</div>
                                 </div>
                             </div>
